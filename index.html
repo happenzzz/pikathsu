@@ -202,10 +202,12 @@
       ball.y = srv.y + P.serveOffset.y;
       const hit = (srv===p1 && p1.wantHit) || (srv===p2 && (state.modeAI ? true : p2.wantHit));
       if(hit){
-        const dir = srv===p1 ? {x: 1, y: -0.4} : {x: -1, y: -0.4};
-        const n = norm(dir.x, dir.y);
-        ball.vx = n.x * SERVE_SPEED; ball.vy = n.y * SERVE_SPEED;
-        state.serving=false; state.msg='';
+const dirX = (srv === p1) ? +1 : -1;   // 살짝 상대 쪽으로
+ball.vx = dirX * SERVE_POP.VX;         // 느린 가로 속도
+ball.vy = -SERVE_POP.VY;               // 위로 '뽕' 뜨게
+ball.fastTimer = 0;                     // 고속 모드 진입 금지
+state.serving = false;
+state.msg = '';
       }
     }
 
@@ -449,3 +451,4 @@
 </script>
 </body>
 </html>
+
