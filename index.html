@@ -3,7 +3,7 @@
 <head>
 <meta charset="utf-8" />
 <meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover" />
-<title>Pikachu Balloon Volleyball — AI & PNG</title>
+<title>Pikachu Balloon Volleyball — Head Pop Defense</title>
 <style>
   :root{
     --bg:#e6f3ff; --court:#f3d39a; --net:#ffffff; --text:#111827;
@@ -72,13 +72,12 @@
   <div id="help">
     <b>조작</b> — P1: <kbd>A</kbd>/<kbd>D</kbd> 이동, <kbd>W</kbd> 점프, <kbd>F</kbd> 서브·스파이크 |
     P2: <kbd>←</kbd>/<kbd>→</kbd> 이동, <kbd>↑</kbd> 점프, <kbd>/</kbd> 서브·스파이크<br>
-    <b>규칙</b> — 기본은 **풍선처럼 천천히** 떠다니고, **스파이크할 때만 고속 모드(약 1.1초)**가 됩니다.
+    <b>규칙</b> — 풍선처럼 천천히 뜨고, <u>머리(윗부분)에 맞으면 크게 ‘뽕’</u>. 스파이크일 때만 고속 모드(≈1.1초).
   </div>
 </div>
 
 <script>
 (() => {
-  // 색상
   const css = getComputedStyle(document.documentElement);
   const COLOR = {
     court: css.getPropertyValue('--court').trim() || '#f3d39a',
@@ -88,10 +87,10 @@
     ear:   css.getPropertyValue('--ear').trim()   || '#2b2b2b',
   };
 
-  // -------- 풍선 모드 & 스파이크 고속 모드 파라미터 --------
+  // --- 풍선 물리 & 스파이크 고속 모드 ---
   const PHYS = {
-    balloon: { G: 900,  AIR: 0.980, MAX: 520 },   // 천천히, 높게, 강한 감속
-    fast:    { G: 900,  AIR: 0.995, MAX: 1100, DURATION: 1.1 } // 스파이크 후 잠깐
+    balloon: { G: 900, AIR: 0.980, MAX: 700 },   // 높이 뜨도록 MAX ↑
+    fast:    { G: 900, AIR: 0.995, MAX: 1100, DURATION: 1.1 }
   };
 
   const W = 960, H = 540;
@@ -103,20 +102,27 @@
   const P = {
     w: 72, h: 82,
     move: 560, maxVx: 420, jump: 820, airCtrl: 0.5,
-    hitBoost: 680,                // 스파이크 힘
+    hitBoost: 680,
     serveOffset: {x: 30, y: -100},
   };
 
-  const POP_UP = 520;             // 캐릭터에 닿으면 '뽕' 뜨는 추가 상승
-  const SERVE_SPEED = 340;        // 서브는 느리게
+  // 수비 팝업 계수
+  const POP_UP   = 620;   // 몸통
+  const HEAD_ZONE= 0.38;  // 윗부분 비율(0~1)
+  const HEAD_POP = 1050;  // 머리 맞으면 크게
+  const HEAD_SIDE= 140;   // 머리 수비 시 상대 코트 쪽으로 미는 힘
+  const SERVE_SPEED = 340;
 
   const cv = document.getElementById('canvas');
   const ctx = cv.getContext('2d'); ctx.imageSmoothingEnabled = false;
 
-  const s1El = document.getElementById('s1'); const s2El = document.getElementById('s2');
+  const s1El = document.getElementById('s1');
+  const s2El = document.getElementById('s2');
   document.getElementById('goal').textContent = GOAL;
 
-  const keys = new Set(); let last = performance.now(); let running = true;
+  const keys = new Set();
+  let last = performance.now();
+  let running = true;
 
   const state = {
     score1:0, score2:0, server:1, serving:true, msg:'F 또는 / 로 서브!',
@@ -125,12 +131,11 @@
 
   const p1 = makePlayer(120, FLOOR_Y - P.h);
   const p2 = makePlayer(W - 120 - P.w, FLOOR_Y - P.h);
-  const ball = makeBall();
-  ball.fastTimer = 0;             // 스파이크 고속 모드 남은 시간
+  const ball = makeBall(); ball.fastTimer = 0;
 
   const sprites = { p1:{img:null,scale:1}, p2:{img:null,scale:1} };
 
-  // ---- 유틸 ----
+  // --- 유틸 ---
   function clamp(v,a,b){ return Math.max(a, Math.min(b,v)); }
   function len(x,y){ return Math.hypot(x,y); }
   function norm(x,y){ const l = Math.hypot(x,y)||1; return {x:x/l,y:y/l}; }
@@ -151,17 +156,17 @@
   function syncScoreUI(){ s1El.textContent = state.score1; s2El.textContent = state.score2; }
   function hardReset(){ state.score1=0; state.score2=0; state.gameOver=false; state.server=Math.random()<.5?1:2; newRound(state.server); }
   function newRound(server){
-    state.serving = true; state.msg = (server===1?'P1 ':'P2 ')+'서브: (P1:<F> / P2:</>)'; state.gameOver=false;
+    state.serving=true; state.msg=(server===1?'P1 ':'P2 ')+'서브: (P1:<F> / P2:</>)'; state.gameOver=false;
     Object.assign(p1,{x:120,y:FLOOR_Y-P.h,vx:0,vy:0,onGround:true});
     Object.assign(p2,{x:W-120-P.w,y:FLOOR_Y-P.h,vx:0,vy:0,onGround:true});
     ball.x = server===1 ? p1.x + P.serveOffset.x : p2.x + P.serveOffset.x + P.w - 2*ball.r;
     ball.y = (server===1 ? p1.y : p2.y) + P.serveOffset.y;
-    ball.vx=0; ball.vy=0; ball.servingTo = server; ball.fastTimer = 0;
+    ball.vx=0; ball.vy=0; ball.servingTo=server; ball.fastTimer=0;
     syncScoreUI();
     if(state.modeAI && server===2){ setTimeout(()=>{ if(state.serving) p2.wantHit=true; },520); setTimeout(()=>{ p2.wantHit=false; },760); }
   }
 
-  // ---- 입력/UI ----
+  // --- 입력/UI ---
   addEventListener('keydown', e=>{
     keys.add(e.key);
     if(e.key==='f'||e.key==='F') p1.wantHit=true;
@@ -173,7 +178,6 @@
     if(e.key==='f'||e.key==='F') p1.wantHit=false;
     if(!state.modeAI && e.key==='/') p2.wantHit=false;
   });
-
   document.getElementById('btnStart').onclick = ()=> running=!running;
   document.getElementById('btnRound').onclick = ()=> { if(!state.gameOver) newRound(state.server); };
   document.getElementById('btnNewGame').onclick = ()=> hardReset();
@@ -187,11 +191,11 @@
   document.getElementById('p2scale').addEventListener('input', e=>sprites.p2.scale=+e.target.value);
   function loadPNG(which,e){ const f=e.target.files?.[0]; if(!f)return; const u=URL.createObjectURL(f); const img=new Image(); img.onload=()=>{sprites[which].img=img; URL.revokeObjectURL(u);}; img.src=u; }
 
-  // ---- 루프 ----
+  // --- 루프 ---
   function frame(t){ const dt=Math.min(1/30,(t-last)/1000); last=t; if(running) update(dt); draw(); requestAnimationFrame(frame); }
   requestAnimationFrame(frame);
 
-  // ---- 업데이트 ----
+  // --- 업데이트 ---
   function update(dt){
     if(state.gameOver) return;
 
@@ -202,12 +206,10 @@
       ball.y = srv.y + P.serveOffset.y;
       const hit = (srv===p1 && p1.wantHit) || (srv===p2 && (state.modeAI ? true : p2.wantHit));
       if(hit){
-const dirX = (srv === p1) ? +1 : -1;   // 살짝 상대 쪽으로
-ball.vx = dirX * SERVE_POP.VX;         // 느린 가로 속도
-ball.vy = -SERVE_POP.VY;               // 위로 '뽕' 뜨게
-ball.fastTimer = 0;                     // 고속 모드 진입 금지
-state.serving = false;
-state.msg = '';
+        const dir = srv===p1 ? {x: 1, y: -0.4} : {x: -1, y: -0.4};
+        const n = norm(dir.x, dir.y);
+        ball.vx = n.x * SERVE_SPEED; ball.vy = n.y * SERVE_SPEED;
+        state.serving=false; state.msg='';
       }
     }
 
@@ -216,15 +218,12 @@ state.msg = '';
     if(!state.modeAI) stepPlayer(p2, dt, {left:['ArrowLeft'], right:['ArrowRight'], jump:['ArrowUp']});
     else aiControl(p2, dt);
 
-    // 공
     if(!state.serving) stepBall(dt);
 
-    // 충돌
     handleBallPlayer(ball, p1);
     handleBallPlayer(ball, p2);
     handleBallNet(ball);
 
-    // 득점
     if(ball.y + ball.r >= FLOOR_Y){
       const leftSide = ball.x < W/2;
       pointTo(leftSide ? 2 : 1);
@@ -256,7 +255,6 @@ state.msg = '';
 
     if(p.y + p.h >= FLOOR_Y){ p.y=FLOOR_Y-p.h; p.vy=0; p.onGround=true; } else p.onGround=false;
 
-    // 네트 충돌
     const nRect = NET;
     if(aabbOverlap(p.x,p.y,p.w,p.h, nRect.x,nRect.y,nRect.w,nRect.h)){
       if(p.x + p.w/2 < W/2) p.x = nRect.x - p.w; else p.x = nRect.x + nRect.w;
@@ -278,8 +276,7 @@ state.msg = '';
     if(ball.x + ball.r > W){ ball.x = W - ball.r; ball.vx = -ball.vx*BOUNCE; }
     if(ball.y - ball.r < 0){ ball.y = ball.r; ball.vy = -ball.vy*BOUNCE; }
 
-    const sp = len(ball.vx, ball.vy);
-    const cap = phys.MAX;
+    const sp = len(ball.vx, ball.vy), cap = phys.MAX;
     if(sp>cap){ const k = cap/sp; ball.vx*=k; ball.vy*=k; }
   }
 
@@ -290,7 +287,7 @@ state.msg = '';
     const l = Math.hypot(hit.dx, hit.dy)||0.0001; const nx = hit.dx/l, ny = hit.dy/l;
     const overlap = b.r - hit.dist; b.x += nx*overlap; b.y += ny*overlap;
 
-    // 기본 반사(풍선 느낌으로 약하게)
+    // 기본 반사(풍선 느낌)
     const vn = b.vx*nx + b.vy*ny;
     const vtX = b.vx - vn*nx, vtY = b.vy - vn*ny;
     const newVn = -vn * 0.75;
@@ -300,21 +297,31 @@ state.msg = '';
     const now = performance.now();
     const pressing = (p===p1) ? p1.wantHit : p2.wantHit;
 
-    if(!pressing){
-      // 풍선처럼 '뽕' 뜨게
-      b.vy -= POP_UP;
-    }else if(now - p.lastHitTime > 90){
-      // 스파이크: 고속 모드 진입 + 아래로 강하게
+    // 내려오는 공일 때만 수비 팝업(이상 반응 방지)
+    const comingDown = b.vy > -60;
+
+    if(!pressing && comingDown){
+      // 헤드 존(윗부분)에 맞으면 크게 ‘뽕’
+      const headLine = p.y + p.h*HEAD_ZONE;
+      const inHead = (b.y <= headLine) && (b.x >= p.x - b.r*0.6) && (b.x <= p.x + p.w + b.r*0.6);
+      if(inHead){
+        b.vy -= HEAD_POP;
+        b.vx += (p===p1 ? +HEAD_SIDE : -HEAD_SIDE); // 상대 코트 쪽으로 살짝
+      }else{
+        b.vy -= POP_UP; // 몸통은 보통 ‘뽕’
+      }
+      // 수비는 고속 모드로 바꾸지 않음
+    }else if(pressing && now - p.lastHitTime > 90){
+      // 스파이크: 고속 모드 + 아래로 강하게
       let ax = (p===p1)? +1 : -1;
-      let ay = +0.60; // 아래로 더 강하게
+      let ay = +0.60;
       const upHeld = (p===p1) ? (keys.has('w')||keys.has('W')) :
                                (state.modeAI ? false : keys.has('ArrowUp'));
-      if(upHeld) ay -= 0.55; // 위키 누르면 각도 완화
+      if(upHeld) ay -= 0.55;
       const a = norm(ax, ay);
       b.vx += a.x * P.hitBoost;
       b.vy += a.y * P.hitBoost;
       p.lastHitTime = now;
-      // 스파이크 고속 모드 타이머
       ball.fastTimer = PHYS.fast.DURATION;
     }
   }
@@ -331,7 +338,6 @@ state.msg = '';
   function pointTo(who){
     if(who===1) state.score1++; else state.score2++;
     syncScoreUI();
-
     if(state.score1>=GOAL || state.score2>=GOAL){
       state.gameOver = true; state.serving=false;
       state.msg = (state.score1>state.score2? 'P1 승리!':'P2 승리!') + '  [새 게임(0:0)]로 재시작하세요.';
@@ -340,7 +346,7 @@ state.msg = '';
     state.server = who; newRound(state.server);
   }
 
-  // ---- AI (기존 로직, 풍선물리 반영) ----
+  // --- AI(풍선물리 반영) ---
   function aiControl(p, dt){
     const DIFF = {
       easy:   { react:.45, moveK:.95, anticipate:12, jumpAgg:.9,  blockSense:.25, hitProb:.7 },
@@ -364,7 +370,6 @@ state.msg = '';
       if(p.onGround) wantJ = true;
     }
 
-    // 가까우면 스파이크 시도(고속 모드로)
     const close = rectCircleOverlap(p.x,p.y,p.w,p.h, ball.x,ball.y, ball.r+10);
     p2.wantHit = !!(close && Math.random() < DIFF.hitProb);
 
@@ -375,7 +380,6 @@ state.msg = '';
   }
 
   function predictLanding(maxTime){
-    // 현재 공 상태 복사(풍선 물리로 예측)
     const phys = PHYS.balloon;
     let x=ball.x, y=ball.y, vx=ball.vx, vy=ball.vy;
     const dt=1/120, steps=Math.floor(maxTime/dt);
@@ -397,7 +401,7 @@ state.msg = '';
   }
   function lerp(a,b,t){ return a + (b-a)*t; }
 
-  // ---- 렌더링 ----
+  // --- 렌더링 ---
   function drawCourt(){
     ctx.clearRect(0,0,W,H);
     ctx.fillStyle = COLOR.court; ctx.fillRect(0, FLOOR_Y, W, H-FLOOR_Y);
@@ -425,8 +429,9 @@ state.msg = '';
     ctx.fillStyle=COLOR.cheek; const cy=y+52, cx1=facing>0?x+w-22:x+22, cx2=facing>0?x+w-58:x+58;
     ctx.beginPath(); ctx.arc(cx1,cy,6,0,Math.PI*2); ctx.fill(); ctx.beginPath(); ctx.arc(cx2,cy,6,0,Math.PI*2); ctx.fill();
     ctx.fillStyle=COLOR.pika; const tb=facing>0?x+4:x+w-4, s=facing>0?-1:1;
-    ctx.beginPath(); ctx.moveTo(tb,y+40); ctx.lineTo(tb+18*s,y+28); ctx.lineTo(tb-2*s,y+16); ctx.lineTo(tb+24*s,y+0);
-    ctx.lineTo(tb+6*s,y-10); ctx.lineTo(tb+30*s,y-26); ctx.lineTo(tb+10*s,y-18); ctx.lineTo(tb+28*s,y-2); ctx.lineTo(tb+8*s,y+12);
+    ctx.beginPath(); ctx.moveTo(tb,y+40);
+    ctx.lineTo(tb+18*s,y+28); ctx.lineTo(tb-2*s,y+16); ctx.lineTo(tb+24*s,y+0); ctx.lineTo(tb+6*s,y-10);
+    ctx.lineTo(tb+30*s,y-26); ctx.lineTo(tb+10*s,y-18); ctx.lineTo(tb+28*s,y-2); ctx.lineTo(tb+8*s,y+12);
     ctx.closePath(); ctx.fill(); ctx.restore();
   }
   function roundRect(x,y,w,h,r,fill){ ctx.beginPath(); ctx.moveTo(x+r,y); ctx.arcTo(x+w,y,x+w,y+h,r); ctx.arcTo(x+w,y+h,x,y+h,r); ctx.arcTo(x,y+h,x,y,r); ctx.arcTo(x,y,x+w,y,r); if(fill) ctx.fill(); else ctx.stroke(); }
@@ -445,10 +450,8 @@ state.msg = '';
     }
   }
 
-  // 초기화
   hardReset();
 })();
 </script>
 </body>
 </html>
-
