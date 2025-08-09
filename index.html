@@ -22,13 +22,15 @@
   .controls{display:flex;flex-wrap:wrap;gap:.4rem}
   button{border:none;padding:.5rem .8rem;border-radius:10px;background:var(--accent);color:#fff;font-weight:800;cursor:pointer}
   button.secondary{background:var(--secondary)}
-  select,input[type=file],input[type=range]{font-size:.92rem}
+  select,input[type=file],input[type=range],input[type=text]{font-size:.92rem}
   .group{display:flex;align-items:center;gap:.35rem;background:#eef2ff;border-radius:10px;padding:.25rem .45rem}
   .small{font-size:.82rem;opacity:.9}
   #canvas{display:block;width:100%;height:auto;border-radius:14px;box-shadow:0 8px 24px #00000033}
   #help{font-size:.92rem;line-height:1.35;margin:.5rem 0 .8rem;background:#ffffffb0;border-radius:12px;padding:.6rem .8rem}
   kbd{background:#111;color:#fff;border-radius:6px;padding:.1rem .35rem;font-weight:700}
   input[type=file]{background:#fff;border-radius:8px;padding:.35rem}
+  .name{border:1px solid #c7d2fe;background:#fff;border-radius:8px;padding:.25rem .5rem;width:9.5rem}
+  .name::placeholder{color:#94a3b8}
 </style>
 </head>
 <body>
@@ -36,13 +38,15 @@
   <div id="hud">
     <div class="row">
       <div class="scoreboard">
-        <div class="score">P1 <span id="s1">0</span> : <span id="s2">0</span> P2</div>
+        <div class="score"><span id="nm1">P1</span> <span id="s1">0</span> : <span id="s2">0</span> <span id="nm2">P2</span></div>
         <span class="goal-pill">목표 <span id="goal">15</span>점</span>
+        <span class="goal-pill">세트 <span id="set1">0</span> : <span id="set2">0</span></span>
       </div>
       <div class="controls">
         <button id="btnStart">시작/일시정지</button>
         <button id="btnRound" class="secondary">라운드 리셋</button>
-        <button id="btnNewGame" class="secondary">새 게임(0:0)</button>
+        <button id="btnNewGame" class="secondary">새 게임(점수만 0:0)</button>
+        <button id="btnResetSets" class="secondary">세트 리셋</button>
         <button id="btnMode" class="secondary">모드: 2인용</button>
         <label class="group small">난이도
           <select id="difficulty">
@@ -55,6 +59,12 @@
     </div>
     <div class="row">
       <div class="controls">
+        <div class="group">
+          <label class="small">P1 이름</label><input id="name1" type="text" class="name" placeholder="예: 피카1" maxlength="12">
+        </div>
+        <div class="group">
+          <label class="small">P2 이름</label><input id="name2" type="text" class="name" placeholder="예: 피카2" maxlength="12">
+        </div>
         <div class="group">
           <label class="small">P1 PNG</label><input id="p1png" type="file" accept="image/*">
           <label class="small">크기</label><input id="p1scale" type="range" min="0.6" max="1.8" step="0.05" value="1">
@@ -89,7 +99,7 @@
 
   // --- 풍선 물리 & 스파이크 고속 모드 ---
   const PHYS = {
-    balloon: { G: 900, AIR: 0.980, MAX: 700 },   // 높이 뜨도록 MAX ↑
+    balloon: { G: 900, AIR: 0.980, MAX: 700 },
     fast:    { G: 900, AIR: 0.995, MAX: 1100, DURATION: 1.1 }
   };
 
@@ -106,11 +116,11 @@
     serveOffset: {x: 30, y: -100},
   };
 
-  // 수비 팝업 계수
-  const POP_UP   = 620;   // 몸통
-  const HEAD_ZONE= 0.38;  // 윗부분 비율(0~1)
-  const HEAD_POP = 1050;  // 머리 맞으면 크게
-  const HEAD_SIDE= 140;   // 머리 수비 시 상대 코트 쪽으로 미는 힘
+  // 수비 팝업 계수 (판정 확대)
+  const POP_UP    = 720;   // 몸통 ‘뽕’ 기본값 조금 ↑
+  const HEAD_ZONE = 0.65;  // 윗부분 비율(커짐: 판정 넓어짐)
+  const HEAD_POP  = 1050;  // 머리 맞으면 크게
+  const HEAD_SIDE = 160;   // 머리 수비 시 상대 코트로 미는 힘
   const SERVE_SPEED = 340;
 
   const cv = document.getElementById('canvas');
@@ -118,16 +128,46 @@
 
   const s1El = document.getElementById('s1');
   const s2El = document.getElementById('s2');
+  const nm1El = document.getElementById('nm1');
+  const nm2El = document.getElementById('nm2');
+  const set1El = document.getElementById('set1');
+  const set2El = document.getElementById('set2');
   document.getElementById('goal').textContent = GOAL;
+
+  const name1Input = document.getElementById('name1');
+  const name2Input = document.getElementById('name2');
 
   const keys = new Set();
   let last = performance.now();
   let running = true;
 
   const state = {
-    score1:0, score2:0, server:1, serving:true, msg:'F 또는 / 로 서브!',
-    modeAI:false, difficulty:'normal', gameOver:false
+    score1:0, score2:0,
+    set1:0, set2:0,
+    server:1, serving:true, msg:'F 또는 / 로 서브!',
+    modeAI:false, difficulty:'normal', gameOver:false,
+    names:{1:'P1',2:'P2'},
+    msgTimer:0
   };
+
+  // 이름 로드/바인딩
+  function loadNames(){
+    const n1 = localStorage.getItem('pika_name1') || 'P1';
+    const n2 = localStorage.getItem('pika_name2') || 'P2';
+    state.names[1] = n1; state.names[2] = n2;
+    name1Input.value = n1; name2Input.value = n2;
+    nm1El.textContent = n1; nm2El.textContent = n2;
+  }
+  loadNames();
+
+  name1Input.addEventListener('input', ()=>{
+    const v = name1Input.value.trim() || 'P1';
+    state.names[1]=v; nm1El.textContent=v; localStorage.setItem('pika_name1',v);
+  });
+  name2Input.addEventListener('input', ()=>{
+    const v = name2Input.value.trim() || 'P2';
+    state.names[2]=v; nm2El.textContent=v; localStorage.setItem('pika_name2',v);
+  });
 
   const p1 = makePlayer(120, FLOOR_Y - P.h);
   const p2 = makePlayer(W - 120 - P.w, FLOOR_Y - P.h);
@@ -154,9 +194,12 @@
   }
   function makeBall(){ return { x: W/4, y: 120, vx: 260, vy: -140, r: 16, servingTo: 1 }; }
   function syncScoreUI(){ s1El.textContent = state.score1; s2El.textContent = state.score2; }
+  function syncSetUI(){ set1El.textContent = state.set1; set2El.textContent = state.set2; }
   function hardReset(){ state.score1=0; state.score2=0; state.gameOver=false; state.server=Math.random()<.5?1:2; newRound(state.server); }
+  function resetSets(){ state.set1=0; state.set2=0; syncSetUI(); }
   function newRound(server){
-    state.serving=true; state.msg=(server===1?'P1 ':'P2 ')+'서브: (P1:<F> / P2:</>)'; state.gameOver=false;
+    state.serving=true; state.gameOver=false; state.msgTimer=0;
+    state.msg = (server===1?`${state.names[1]}`:`${state.names[2]}`) + ' 서브: (P1:<F> / P2:</>)';
     Object.assign(p1,{x:120,y:FLOOR_Y-P.h,vx:0,vy:0,onGround:true});
     Object.assign(p2,{x:W-120-P.w,y:FLOOR_Y-P.h,vx:0,vy:0,onGround:true});
     ball.x = server===1 ? p1.x + P.serveOffset.x : p2.x + P.serveOffset.x + P.w - 2*ball.r;
@@ -180,7 +223,8 @@
   });
   document.getElementById('btnStart').onclick = ()=> running=!running;
   document.getElementById('btnRound').onclick = ()=> { if(!state.gameOver) newRound(state.server); };
-  document.getElementById('btnNewGame').onclick = ()=> hardReset();
+  document.getElementById('btnNewGame').onclick = ()=> { state.score1=0; state.score2=0; syncScoreUI(); newRound(state.server); };
+  document.getElementById('btnResetSets').onclick = ()=> resetSets();
   const btnMode = document.getElementById('btnMode');
   btnMode.onclick = ()=>{ state.modeAI=!state.modeAI; btnMode.textContent = state.modeAI?'모드: 1인용 AI':'모드: 2인용'; newRound(1); };
   const diffSel = document.getElementById('difficulty'); diffSel.onchange = ()=> state.difficulty = diffSel.value;
@@ -198,6 +242,8 @@
   // --- 업데이트 ---
   function update(dt){
     if(state.gameOver) return;
+
+    if(state.msgTimer>0){ state.msgTimer -= dt; if(state.msgTimer<=0) state.msg=''; }
 
     // 서브
     if(state.serving){
@@ -297,16 +343,20 @@
     const now = performance.now();
     const pressing = (p===p1) ? p1.wantHit : p2.wantHit;
 
-    // 내려오는 공일 때만 수비 팝업(이상 반응 방지)
-    const comingDown = b.vy > -60;
+    // 예: 살짝 떠오르는 중이라도 수비 팝업 허용(완화)
+    const comingDown = b.vy > -180;
 
     if(!pressing && comingDown){
-      // 헤드 존(윗부분)에 맞으면 크게 ‘뽕’
-      const headLine = p.y + p.h*HEAD_ZONE;
-      const inHead = (b.y <= headLine) && (b.x >= p.x - b.r*0.6) && (b.x <= p.x + p.w + b.r*0.6);
+      // 헤드 존(윗부분)에 맞으면 크게 ‘뽕’ — 세로/가로 판정 크게
+      const headLine = p.y + p.h*HEAD_ZONE; // 이 선보다 위면 '머리/윗부분'
+      const horizontalSlack = b.r * 1.5;     // 좌우 여유폭 ↑
+      const inHead = (b.y <= headLine) &&
+                     (b.x >= p.x - horizontalSlack) &&
+                     (b.x <= p.x + p.w + horizontalSlack);
+
       if(inHead){
         b.vy -= HEAD_POP;
-        b.vx += (p===p1 ? +HEAD_SIDE : -HEAD_SIDE); // 상대 코트 쪽으로 살짝
+        b.vx += (p===p1 ? +HEAD_SIDE : -HEAD_SIDE);
       }else{
         b.vy -= POP_UP; // 몸통은 보통 ‘뽕’
       }
@@ -339,11 +389,19 @@
     if(who===1) state.score1++; else state.score2++;
     syncScoreUI();
     if(state.score1>=GOAL || state.score2>=GOAL){
-      state.gameOver = true; state.serving=false;
-      state.msg = (state.score1>state.score2? 'P1 승리!':'P2 승리!') + '  [새 게임(0:0)]로 재시작하세요.';
+      // 세트 획득 처리
+      if(state.score1>state.score2){ state.set1++; state.server = 1; flashMsg(`${state.names[1]} 1세트 획득!`); }
+      else                         { state.set2++; state.server = 2; flashMsg(`${state.names[2]} 1세트 획득!`); }
+      syncSetUI();
+      state.score1=0; state.score2=0; syncScoreUI();
+      newRound(state.server); // 다음 세트 바로 시작
       return;
     }
     state.server = who; newRound(state.server);
+  }
+
+  function flashMsg(text, sec=1.6){
+    state.msg = text; state.msgTimer = sec;
   }
 
   // --- AI(풍선물리 반영) ---
